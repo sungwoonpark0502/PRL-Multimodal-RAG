@@ -1,0 +1,146 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.container {
+    background-color: #fff;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 500px;
+}
+
+h1 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 25px;
+}
+
+.upload-section, .text-section, .output-section {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #444;
+}
+
+input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background: #f9f9f9;
+}
+
+textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+#responseOutput {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    min-height: 100px;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+
+button.processing {
+    opacity: 0.7;
+    cursor: not-allowed;
+    background-color: #0056b3;
+}
+
+#responseOutput {
+    white-space: pre-wrap;
+    line-height: 1.6;
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 5px;
+}
+
+.loading {
+    color: #666;
+    font-style: italic;
+    padding: 15px;
+}
+
+.error {
+    color: #dc3545;
+    border-left: 3px solid #dc3545;
+    padding: 15px;
+    margin: 10px 0;
+    background: #fff5f5;
+}
+
+.success {
+    color: #28a745;
+    padding: 15px;
+    border-left: 3px solid #28a745;
+    background: #f0fff4;
+}
+
+.response {
+    padding: 15px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.context-used {
+    margin-top: 15px;
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.processing-time {
+    margin-top: 5px;
+    color: #6c757d;
+    font-size: 0.8em;
+}
+
+strong {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+button.processing {
+    opacity: 0.7;
+    cursor: not-allowed;
+    background-color: #0056b3 !important;
+}
