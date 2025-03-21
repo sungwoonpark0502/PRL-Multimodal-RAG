@@ -16,40 +16,78 @@
 
     <!-- Hero Section -->
     <section class="hero">
-        <h1>RAG</h1>
-        <p>Teach and ask</p>
+        <h1>Multimodal RAG</h1>
+        <p>Upload, Teach, and Ask</p>
     </section>
 
     <!-- Upload & Input Section -->
     <section class="upload-section">
         <div class="card">
-            <h2>Upload a File</h2>
-            <form action="/" method="post" enctype="multipart/form-data">
-                <input type="file" name="file" id="file-upload">
+            <h2>Upload Data</h2>
+            <form id="upload-form" enctype="multipart/form-data">
+                <input type="file" name="file" id="file-upload" multiple>
                 <label for="file-upload" class="custom-upload-btn">Choose File</label>
-                <button type="submit" class="btn">Upload</button>
+                <button type="button" class="btn" onclick="uploadFile()">Upload</button>
+                <p id="upload-status" class="status-message"></p>
             </form>
         </div>
 
         <div class="card">
             <h2>Enter Text</h2>
-            <form action="/" method="post">
-                <textarea name="text_input" placeholder="Type your text here..."></textarea>
-                <button type="submit" class="btn">Submit</button>
+            <form id="text-form">
+                <textarea name="text_input" id="text-input" placeholder="Type your text here..."></textarea>
+                <button type="button" class="btn" onclick="uploadText()">Submit</button>
+                <p id="text-status" class="status-message"></p>
             </form>
         </div>
     </section>
 
-    <!-- Display Messages -->
-    {% if message %}
-        <p class="status-message">{{ message }}</p>
-    {% endif %}
+    <!-- Loading Indicator -->
+    <p id="loading-message" class="status-message" style="display: none;">Processing...</p>
+
+    <!-- Metadata Input -->
+    <section class="metadata-section">
+        <h2>Enter Metadata</h2>
+        <input type="text" id="metadata" placeholder="Enter metadata for your input">
+    </section>
+
+    <!-- Display Extracted Text from Gemini -->
+    <section class="output-section">
+        <h2>Extracted Text</h2>
+        <p id="extracted-text">Waiting for input...</p>
+    </section>
+
+    <!-- Chunking Results -->
+    <section class="chunking-section">
+        <h2>Chunking Results & Vector Embeddings</h2>
+        <div id="chunked-results"></div>
+    </section>
+
+    <!-- Database Controls -->
+    <section class="db-section">
+        <h2>Database Controls</h2>
+        <button class="btn" onclick="resetDB()">Reset DB</button>
+        <button class="btn" onclick="showDBContents()">Show Stored Data</button>
+        <div id="db-output" style="margin-top: 10px;"></div>
+    </section>
 
     <!-- Query Section -->
     <section class="query-section">
         <h2>Ask a Question</h2>
         <div class="query-box">
             <input type="text" id="query" placeholder="Ask anything...">
+        </div>
+
+        <!-- Query Embedding Display -->
+        <div class="query-embedding">
+            <h3>Query Vector Embedding</h3>
+            <p id="query-embedding">None</p>
+        </div>
+
+        <!-- Adjustable k-value for retrieval -->
+        <div class="k-selection">
+            <label for="k-value">Select k (number of relevant results to retrieve):</label>
+            <input type="number" id="k-value" min="1" max="10" value="3">
         </div>
 
         <!-- Toggle between DB only and DB + Gemini -->
@@ -65,49 +103,215 @@
         </div>
 
         <button onclick="askQuestion()" class="btn">Ask</button>
-        
+
+        <!-- Retrieved Raw Chunks & Embeddings -->
+        <div id="retrieved-chunk">
+            <h3>Retrieved Chunks</h3>
+            <p id="retrieved-text">None</p>
+            <h3>Retrieved Chunk Embeddings</h3>
+            <p id="retrieved-embedding">None</p>
+        </div>
+
+        <!-- LLM Response -->
         <div id="response-container">
+            <h3>LLM Response</h3>
             <p id="response"></p>
         </div>
     </section>
 
     <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            console.log("Page loaded: Multimodal RAG");
+        });
+
+        function uploadFile() {
+            let formData = new FormData();
+            let fileInput = document.getElementById("file-upload");
+            let metadata = document.getElementById("metadata").value;
+            let uploadStatus = document.getElementById("upload-status");
+            let loadingMessage = document.getElementById("loading-message");
+
+            // Clear status
+            uploadStatus.innerText = "";
+            loadingMessage.style.display = "block";
+            loadingMessage.innerText = "Uploading file...";
+
+            for (let file of fileInput.files) {
+                formData.append("files", file);
+            }
+            formData.append("metadata", metadata);
+
+            fetch("/upload", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadingMessage.style.display = "none";
+                if (Array.isArray(data) && data.length > 0) {
+                    uploadStatus.innerText = "✅ File(s) uploaded successfully!";
+                    const firstResp = data[0];
+                    document.getElementById("extracted-text").innerText = firstResp.extracted_text || "N/A";
+                    showChunkData(firstResp.chunk_data || []);
+                } else {
+                    uploadStatus.innerText = "❌ No data returned.";
+                }
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                loadingMessage.style.display = "none";
+                uploadStatus.innerText = "❌ Upload failed.";
+            });
+        }
+
+        function uploadText() {
+            let textInput = document.getElementById("text-input").value;
+            let metadata = document.getElementById("metadata").value;
+            let textStatus = document.getElementById("text-status");
+            let loadingMessage = document.getElementById("loading-message");
+
+            // Clear status
+            textStatus.innerText = "";
+            loadingMessage.style.display = "block";
+            loadingMessage.innerText = "Processing text...";
+
+            fetch("/upload-text", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: textInput, metadata: metadata })
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadingMessage.style.display = "none";
+                textStatus.innerText = "✅ Text submitted!";
+                document.getElementById("extracted-text").innerText = data.extracted_text || "N/A";
+                showChunkData(data.chunk_data || []);
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                textStatus.innerText = "❌ Text submission failed.";
+                loadingMessage.style.display = "none";
+            });
+        }
+
+        function showChunkData(chunkData) {
+            let chunkResultsDiv = document.getElementById("chunked-results");
+            chunkResultsDiv.innerHTML = ""; // Clear old results
+
+            if (!chunkData.length) {
+                chunkResultsDiv.innerHTML = "<p>No chunks generated.</p>";
+                return;
+            }
+
+            let ul = document.createElement("ul");
+            chunkData.forEach((obj, index) => {
+                let chunkText = obj.chunk;
+                let embedPreview = JSON.stringify(obj.embedding).slice(0,60) + "...";
+
+                let li = document.createElement("li");
+                li.innerHTML = `<strong>• ${chunkText}</strong><br>[${embedPreview}]`;
+                ul.appendChild(li);
+            });
+            chunkResultsDiv.appendChild(ul);
+        }
+
         function askQuestion() {
             let queryText = document.getElementById("query").value;
             let responseElement = document.getElementById("response");
-            
+            let kValue = document.getElementById("k-value").value;
+            let responseMode = document.querySelector('input[name="response_mode"]:checked').value;
+            let loadingMessage = document.getElementById("loading-message");
+
             if (!queryText.trim()) {
                 responseElement.innerText = "Please enter a question.";
                 return;
             }
 
-            // Get selected response mode (DB only or DB + Gemini)
-            let responseMode = document.querySelector('input[name="response_mode"]:checked').value;
-
-            // Display loading message
-            responseElement.innerText = "Fetching response...";
+            loadingMessage.style.display = "block";
+            loadingMessage.innerText = "Fetching response...";
 
             fetch("/query", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: queryText, response_mode: responseMode })
+                body: JSON.stringify({ query: queryText, response_mode: responseMode, k: kValue })
             })
             .then(response => response.json())
             .then(data => {
-                if (data.response) {
-                    responseElement.innerText = data.response;
-                } else if (data.error) {
-                    responseElement.innerText = "Error: " + data.error;
+                loadingMessage.style.display = "none";
+
+                const queryEmbedding = data.query_embedding || "None";
+                const chunkArray = data.retrieved_chunk || [];
+                const embeddingArray = data.retrieved_embedding || [];
+                const llmResponse = data.response || "No response";
+
+                // Display query embedding
+                document.getElementById("query-embedding").innerText = JSON.stringify(queryEmbedding);
+
+                // Display chunk text
+                if (chunkArray.length > 0) {
+                    document.getElementById("retrieved-text").innerText = chunkArray.join("\n---\n");
                 } else {
-                    responseElement.innerText = "Unexpected response format.";
+                    document.getElementById("retrieved-text").innerText = "No retrieved chunks.";
                 }
+
+                // Display chunk embeddings
+                if (embeddingArray.length > 0) {
+                    let embedText = embeddingArray.map((emb, idx) => {
+                        return `Chunk ${idx+1} Embedding: ${JSON.stringify(emb).slice(0,50)}...`;
+                    }).join("\n");
+                    document.getElementById("retrieved-embedding").innerText = embedText;
+                } else {
+                    document.getElementById("retrieved-embedding").innerText = "No retrieved embeddings.";
+                }
+
+                // Display final LLM response
+                responseElement.innerText = llmResponse;
             })
             .catch(error => {
                 console.error("Error:", error);
+                loadingMessage.style.display = "none";
                 responseElement.innerText = "Failed to fetch response. Please try again.";
             });
         }
-    </script>
 
+        // -------------- DB CONTROL FUNCTIONS --------------
+        function resetDB() {
+            fetch("/reset-db", {
+                method: "POST"
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+            })
+            .catch(error => {
+                console.error("Error resetting DB:", error);
+            });
+        }
+
+        function showDBContents() {
+            fetch("/db-contents")
+            .then(response => response.json())
+            .then(data => {
+                let dbOutput = document.getElementById("db-output");
+                dbOutput.innerHTML = ""; // Clear old content
+
+                if (data.documents && data.documents.length > 0) {
+                    let html = "<ul>";
+                    data.documents.forEach(doc => {
+                        html += `<li><strong>ID:</strong> ${doc.id}<br>` +
+                                `<strong>Raw Text:</strong> ${doc.metadata.raw_text}<br>` +
+                                `<strong>Metadata:</strong> ${JSON.stringify(doc.metadata.metadata)}</li><br>`;
+                    });
+                    html += "</ul>";
+                    dbOutput.innerHTML = html;
+                } else {
+                    dbOutput.innerText = "No documents found in the database.";
+                }
+            })
+            .catch(error => {
+                console.error("Error fetching DB contents:", error);
+            });
+        }
+    </script>
 </body>
 </html>

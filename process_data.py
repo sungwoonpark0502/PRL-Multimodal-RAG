@@ -1,108 +1,184 @@
+import os
 import chromadb
 import pdfminer.high_level
-import fitz  # PyMuPDF for extracting images
-import pytesseract
-from PIL import Image
-import io
-from embeddings import generate_text_embedding
+import fitz  # PyMuPDF for handling PDFs
+import pytesseract  # OCR for extracting text from images
+from PIL import Image  # Image processing
+import io  # Handle binary file data
+import whisper  # OpenAI Whisper for audio/video transcription
+import google.generativeai as genai  # Google Gemini LLM API
+from embeddings import generate_text_embedding  # Custom function for text embedding
+import re  # Regex for text processing
+import uuid  # Generate unique IDs to prevent duplicates
+import subprocess  # To convert video to audio
 
-# Initialize ChromaDB persistent client with local storage
+# Initialize ChromaDB client with persistent local storage
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
-
-# Get or create a collection named "documents" to store embeddings
 collection = chroma_client.get_or_create_collection(name="documents")
 
-def store_data(data_id, raw_text, embedding):
+def store_data(data_id, raw_text, embedding, metadata=""):
     """
-    Stores text input or file data in ChromaDB.
-
-    Args:
-        data_id (str): Unique identifier for the data.
-        raw_text (str): The original text content.
-        embedding (list): The generated embedding vector for the text.
+    Stores text data in ChromaDB with a unique identifier, vector embeddings, and metadata.
     """
-    collection.add(
-        ids=[data_id],  # Store with a unique identifier
-        embeddings=[embedding],  # Store the corresponding embedding vector
-        metadatas=[{"raw_text": raw_text}]  # Store the original text as metadata
-    )
+    if not raw_text.strip():
+        print(f"Skipping {data_id}: Empty raw text.")
+        return
 
-def extract_images_from_pdf(pdf_path):
+    if not embedding or len(embedding) == 0:
+        print(f"Skipping {data_id}: Empty embedding.")
+        return
+
+    if not isinstance(embedding[0], list):
+        embedding = [embedding]  # Ensure embedding is 2D
+
+    unique_id = f"{data_id}_{uuid.uuid4().hex[:8]}"  # Prevent duplicate IDs
+    try:
+        collection.add(
+            ids=[unique_id],
+            embeddings=embedding,
+            metadatas=[{"raw_text": raw_text, "metadata": metadata}]
+        )
+        print(f"Stored data with ID: {unique_id}")
+    except Exception as e:
+        print(f"Error storing data with ID {unique_id}: {e}")
+
+### FILE PROCESSING FUNCTIONS ###
+
+def extract_text_from_pdf(file_path):
+    """ Extracts text from a PDF using PyMuPDF. """
+    return pdfminer.high_level.extract_text(file_path)
+
+def extract_text_from_txt(file_path):
+    """ Reads text from a .txt file. """
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def extract_text_from_image(file_path):
+    """ Extracts text from an image using OCR (Tesseract). """
+    image = Image.open(file_path)
+    return pytesseract.image_to_string(image)
+
+def convert_video_to_audio(video_path):
+    """ Converts video to an audio file using ffmpeg. Returns the audio path. """
+    audio_path = video_path.replace(".mp4", ".wav")
+    try:
+        subprocess.run(["ffmpeg", "-i", video_path, "-q:a", "0", "-map", "a", audio_path, "-y"], check=True)
+        return audio_path
+    except subprocess.CalledProcessError as e:
+        print(f"Error converting video: {e}")
+        return None
+
+def transcribe_audio(file_path):
     """
-    Extracts images from a PDF and applies OCR to extract text.
-
-    Args:
-        pdf_path (str): Path to the PDF file.
-
-    Returns:
-        str: Extracted text from images in the PDF.
+    Transcribes an audio file using OpenAI's Whisper model.
+    Returns transcribed text.
     """
-    extracted_text = ""
+    model = whisper.load_model("base")  # Load Whisper ASR model
+    result = model.transcribe(file_path)
+    return result["text"]
 
-    # Open the PDF file
-    pdf_doc = fitz.open(pdf_path)
-
-    for page_num in range(len(pdf_doc)):  
-        page = pdf_doc[page_num]
-        image_list = page.get_images(full=True)  # Extract all images on the page
-
-        for img_index, img in enumerate(image_list):
-            xref = img[0]  # Image reference ID
-            base_image = pdf_doc.extract_image(xref)  # Extract the image
-            image_bytes = base_image["image"]  # Get image bytes
-            image = Image.open(io.BytesIO(image_bytes))  # Convert to PIL image
-
-            # Apply OCR to extract text from the image
-            text_from_image = pytesseract.image_to_string(image)
-            extracted_text += f"\n[Image {img_index+1} on Page {page_num+1}]: {text_from_image}\n"
-
-    return extracted_text.strip()
-
-def process_and_store_file(file_path):
+def process_and_store_file(file_path, metadata=""):
     """
-    Processes a file, extracts its content, generates an embedding, and stores it.
-
-    Args:
-        file_path (str): Path to the file being processed.
-
-    Returns:
-        str: Success message or an error if the file type is unsupported.
+    Processes a file (PDF, TXT, Image, Audio, Video), extracts text,
+    summarizes it using agentic chunking, generates embeddings, and stores in ChromaDB.
     """
-    # Extract file extension to determine processing method
     file_extension = file_path.split(".")[-1].lower()
+    raw_text = ""
 
-    # Process text files (.txt)
-    if file_extension in ["txt"]:
-        with open(file_path, "r", encoding="utf-8") as f:
-            raw_text = f.read()  # Read the file content
-        embedding = generate_text_embedding(raw_text)  # Generate text embedding
+    if file_extension == "txt":
+        raw_text = extract_text_from_txt(file_path)
+    elif file_extension == "pdf":
+        raw_text = extract_text_from_pdf(file_path)
+    elif file_extension in ["png", "jpg", "jpeg", "tiff"]:
+        raw_text = extract_text_from_image(file_path)
+    elif file_extension in ["mp3", "wav"]:
+        raw_text = transcribe_audio(file_path)
+    elif file_extension in ["mp4", "avi", "mov"]:
+        audio_path = convert_video_to_audio(file_path)
+        if audio_path:
+            raw_text = transcribe_audio(audio_path)
 
-    # Process PDF files (.pdf) with both text and image extraction
-    elif file_extension in ["pdf"]:
-        # Extract text from the PDF
-        raw_text = pdfminer.high_level.extract_text(file_path)
+    if not raw_text.strip():
+        return "No content extracted from file!", None
 
-        # Extract images and apply OCR if needed
-        image_text = extract_images_from_pdf(file_path)
+    chunks = agentic_chunk_text(raw_text)
+    chunk_data = []
+    for idx, c in enumerate(chunks):
+        emb = generate_text_embedding(c)
+        if emb:
+            store_data(f"{file_path}_chunk_{idx}", c, emb, metadata)
+            chunk_data.append({"chunk": c, "embedding": emb})
 
-        # Combine extracted text with OCR results
-        full_text = raw_text + "\n" + image_text if image_text else raw_text
+    return raw_text, chunk_data
 
-        # Generate embedding for the combined text
-        embedding = generate_text_embedding(full_text)
+### GEMINI LLM FUNCTIONS ###
 
-    # Process image files (.png, .jpg, .jpeg)
-    elif file_extension in ["png", "jpg", "jpeg"]:
-        from embeddings import generate_image_embedding  # Import image embedding function
-        with open(file_path, "rb") as f:
-            image_data = f.read()  # Read image as binary data
-        embedding = generate_image_embedding(image_data)  # Generate image embedding
-        full_text = "Extracted text stored in embedding."  # Placeholder for metadata
+def extract_topic(text):
+    """
+    Extracts the main topic using Gemini LLM.
+    If response is generic, uses regex fallback.
+    """
+    model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+    entity_prompt = (
+        "Extract the **main topic** from the following text.\n\n"
+        f"{text}"
+    )
+    try:
+        entity_response = model.generate_content(entity_prompt)
+        entity_name = entity_response.text.strip() if entity_response else ""
+        return entity_name if entity_name else extract_topic_fallback(text)
+    except Exception as e:
+        print(f"[extract_topic] Error: {e}")
+        return extract_topic_fallback(text)
 
-    else:
-        return "Unsupported file type!"  # Handle unsupported file types
+def extract_topic_fallback(text):
+    """ Extracts a topic based on capitalized phrases. """
+    matches = re.findall(r'\b[A-Z][a-z]*\b(?:\s+[A-Z][a-z]*)*', text)
+    return matches[0] if matches else "Unknown Topic"
 
-    # Store extracted data and embedding in ChromaDB
-    store_data(file_path, full_text, embedding)
+def agentic_chunk_text(text):
+    """ Summarizes text into bullet points dynamically using Gemini LLM. """
+    text = text.strip()
+    if not text:
+        return []
 
-    return f"{file_path} processed successfully!"  # Return success message
+    entity_name = extract_topic(text)
+    model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+    summarize_prompt = (
+        f"Summarize the following text into bullet points.\n\n"
+        f"Text:\n{text}"
+    )
+    try:
+        response = model.generate_content(summarize_prompt)
+        if response and hasattr(response, "text"):
+            bullet_text = response.text.strip()
+            lines = bullet_text.split("\n")
+            return [f"{entity_name}: {line.strip('•-* ')}" for line in lines if line.strip()]
+    except Exception as e:
+        print(f"[agentic_chunk_text] Error: {e}")
+    
+    return naive_sentence_fallback(entity_name, text)
+
+def naive_sentence_fallback(entity_name, text):
+    """ Fallback text chunking using simple sentence splitting. """
+    sentences = re.split(r'[.!?]\s+', text.strip())
+    return [f"{entity_name}: {sent.strip()}" for sent in sentences if sent.strip()]
+
+### TEXT PROCESSING FUNCTION ###
+def process_and_store_text(user_text, metadata=""):
+    """
+    Processes text input, dynamically generates bullet-point summaries,
+    embeds, and stores in ChromaDB.
+    """
+    user_text = user_text.strip()
+    if not user_text:
+        return "No text provided!", None
+
+    chunks = agentic_chunk_text(user_text)
+    chunk_data = []
+    for idx, c in enumerate(chunks):
+        emb = generate_text_embedding(c)
+        if emb:
+            store_data(f"text_input_chunk_{idx}", c, emb, metadata)
+            chunk_data.append({"chunk": c, "embedding": emb})
+    return user_text, chunk_data

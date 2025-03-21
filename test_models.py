@@ -1,6 +1,6 @@
 import google.generativeai as genai
-import config  # Ensure API key is set
+genai.configure(api_key="AIzaSyDyC5jmGivHO15aVKN2jEim5SmaKLu-xiA")
 
-models = genai.list_models()
-for model in models:
-    print(model)
+model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+response = model.generate_content("Who is Cristiano Ronaldo?")
+print(response.text)
