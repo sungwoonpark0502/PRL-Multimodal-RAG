@@ -137,32 +137,69 @@ def extract_topic_fallback(text):
     return matches[0] if matches else "Unknown Topic"
 
 def agentic_chunk_text(text):
-    """ Summarizes text into bullet points dynamically using Gemini LLM. """
+    """
+    Uses Gemini LLM to extract topics from the provided text and generate bullet points.
+    There are two cases:
+      Case 1: If the text revolves around one main topic, each bullet must be in the format:
+                <Main Topic>, <Sub Topic>: <Concise summary>
+      Case 2: If the text contains multiple independent topics, each bullet must be in the format:
+                <Topic>: <Concise summary>
+    Only output the bullet points in the specified format.
+    """
     text = text.strip()
     if not text:
         return []
+    
+    summarize_prompt = f"""
+    You are an advanced text summarization agent. The user has provided the following text:
 
-    entity_name = extract_topic(text)
-    model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
-    summarize_prompt = (
-        f"Summarize the following text into bullet points.\n\n"
-        f"Text:\n{text}"
-    )
+    {text}
+
+    First, determine if the text is primarily about one main topic or about multiple independent topics.
+
+    If it is primarily about one main topic (Case 1), generate bullet points using this exact format:
+        <Main Topic>, <Sub Topic>: <Summary of key details about that subtopic>
+    For example, if the text is about a product called "Apple iPhone 16", your output might look like:
+        Apple iPhone 16, iPhone 16: Features the new A18 chip, enhanced camera capabilities, and design refinements.
+        Apple iPhone 16, A18 Chip: Provides substantial performance and efficiency improvements for gaming and AI tasks.
+        Apple iPhone 16, Camera System: Includes upgraded sensors and computational photography features.
+        Apple iPhone 16, Design Refinements (iPhone 16 Pro): Offers thinner display borders and a titanium build.
+        Apple iPhone 16, Intelligence: Powers AI processing for overall performance enhancements.
+
+    If the text contains multiple independent topics (Case 2), generate bullet points using this exact format:
+        <Topic>: <Summary of key details about that topic>
+    For example, if the text states "James likes basketball but Sam likes soccer", your output might be:
+        James: James likes basketball.
+        Sam: Sam likes soccer.
+
+    Only output the summarized bullet points in the specified format and nothing else.
+    """
+    
     try:
+        model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
         response = model.generate_content(summarize_prompt)
         if response and hasattr(response, "text"):
             bullet_text = response.text.strip()
             lines = bullet_text.split("\n")
-            return [f"{entity_name}: {line.strip('•-* ')}" for line in lines if line.strip()]
+            cleaned_chunks = []
+            for line in lines:
+                # Clean the line by removing extra bullet markers and spaces.
+                line = line.strip().lstrip("-•*").strip()
+                if line:
+                    if ":" not in line:
+                        line = f"General: {line}"
+                    cleaned_chunks.append(line)
+            return cleaned_chunks
     except Exception as e:
         print(f"[agentic_chunk_text] Error: {e}")
     
-    return naive_sentence_fallback(entity_name, text)
+    return naive_sentence_fallback(text)
 
-def naive_sentence_fallback(entity_name, text):
-    """ Fallback text chunking using simple sentence splitting. """
+def naive_sentence_fallback(text):
+    import re
     sentences = re.split(r'[.!?]\s+', text.strip())
-    return [f"{entity_name}: {sent.strip()}" for sent in sentences if sent.strip()]
+    return [f"General: {sent.strip()}" for sent in sentences if sent.strip()]
+
 
 ### TEXT PROCESSING FUNCTION ###
 def process_and_store_text(user_text, metadata=""):
