@@ -1,1 +1,0 @@
-# PRL-Multimodal-RAG
